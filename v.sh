@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # set -xv
-set -o posix -ef -o pipefail # ajouter l'option u ("unlinked") pour vérifier que les variables ne sont pas sans lien (désactivée ici : -u ne semble pas gérer correctement les variables awk $X)
+set -o posix -ef #-o pipefail # ajouter l'option u ("unlinked") pour vérifier que les variables ne sont pas sans lien (désactivée ici : -u ne semble pas gérer correctement les variables awk $X)
 
 name="$0"
 version="$name version 2017.03 \"more params\""
 c=1 # seuls les mots apparaissant au moins c fois seront conservés
 L=42 # le nombre de mots utilisés pour détecter la langue d'entrée
+T=3 # le nombre de mots utilisés pour deviner le thème d'un texte
 w=1 # seuls les mots de w lettres et plus seront conservés
 cwfp="$(dirname $0)/data/ls_common_4k/"
 nature="not found"
@@ -13,13 +14,13 @@ theme="not found"
 
 
 # flags correspondant aux arguments renseignés
-c_on=false ; l_on=false ; L_on=false ; n_on=false ; p_on=false ; s_on=false ; t_on=false ; w_on=false
+c_on=false ; l_on=false ; L_on=false ; n_on=false ; p_on=false ; s_on=false ; t_on=false ; T_on=false ; w_on=false
 
 manpage="NAME
 		$name - a tool around text basic analysis
 
 SYNOPSIS
-		\033[1m$name\033[0m \033[4mFILE\033[0m [\033[1m-c\033[0m \033[4mMIN\033[0m] [\033[1m-l\033[0m] [\033[1m-L\033[0m \033[4mNUM\033[0m] [\033[1m-n\033[0m] [\033[1m-p\033[0m] [\033[1m-s\033[0m] [\033[1m-t\033[0m] [\033[1m-w\033[0m \033[4mMIN\033[0m]
+		\033[1m$name\033[0m \033[4mFILE\033[0m [\033[1m-c\033[0m \033[4mMIN\033[0m] [\033[1m-l\033[0m] [\033[1m-L\033[0m \033[4mNUM\033[0m] [\033[1m-n\033[0m] [\033[1m-p\033[0m] [\033[1m-s\033[0m] [\033[1m-t\033[0m] [\033[1m-T\033[0m \033[4mNUM\033[0m] [\033[1m-w\033[0m \033[4mMIN\033[0m]
 		\033[1m$name\033[0m [\033[1m--help\033[0m|\033[1m--manual\033[0m|\033[1m--version\033[0m]
 
 DESCRIPTION
@@ -45,6 +46,9 @@ DESCRIPTION
 
 		-t, --theme
 			try to guess the theme of the text
+
+		-T
+			the number of words kept during theme seeking
 		
 		-w, --word-length
 			the minimum length requirement for words to be kept during analysis
@@ -147,7 +151,8 @@ function performAnalysis {
 	getVerbs
 
 	#TODO rechercher le thème du texte (encyclopédie)
-	#guessTheme
+	guessTheme
+	theme=$(cat tmp/vtheme.txt)
 
 	show # affichage final
 }
@@ -159,7 +164,7 @@ function show {
 	# -p montre le résultat du filtrage à l'utilisateur si demandé
 	if [ $l_on = false ] && [ $n_on = false ] && [ $t_on = false ]; then p_on=true ;fi # par défaut, pas d'affichage du processing si on cherche à connaître des carctéristiques précises du texte
 	if [ $p_on = true ]; then cat tmp/vout_00.txt ;fi      # -p processing si demandé
-	if ([ $l_on = true ] || [ $n_on = true ] || [ $t_on = true ]) && [ $p_on = true ]; then echo "======= Informations =======" ;fi # affichage d'un séparateur entre la partie traitement et la partie infos, si besoin est
+	if ([ $l_on = true ] || [ $n_on = true ] || [ $t_on = true ]) && [ $p_on = true ]; then echo "======= Results =======" ;fi # affichage d'un séparateur entre la partie traitement et la partie infos, si besoin est
 	if [ $l_on = true ]; then echo "language: ${lang}" ;fi # -l langue     si demandée
 	if [ $n_on = true ]; then echo "nature: ${nature}" ;fi # -n nature     si demandée
 	if [ $t_on = true ]; then echo "theme: ${theme}" ;fi   # -t thème      si demandé
@@ -168,14 +173,13 @@ function show {
 
 
 # tente de deviner le thème d'un texte
-# function guessTheme {
-# 	if [ $t_on = true ]; then
-# 		key=$(tail -2 tmp/vout_00.txt | awk '{print "(?=\\b"$2"\\b).*"}' ORS='') # utilisation de lookafters sur les mots-clés
-# 		echo "KEYYYYYYYYYYYYYYYYYYYY : $key"
-# 		grep -iP "${key}" data/champ_lexi/ve.txt
-# 		#sort -g | tail -1 | awk '{print $2}' >tmp/vtheme.txt
-# 	fi
-# }
+function guessTheme {
+	if [ $t_on = true ]; then
+		regex="$(tail -$T tmp/vout_00.txt | iconv -f utf8 -t ascii//TRANSLIT | awk '{print "(?=\\b"$2"\\b).*"}' ORS='' | sed 's#\.\*$##')" # il n'y a pas d'accents dans l'encyclopédie virtuelle   |   utilisation de PCRE (option -P) pour pouvoir utiliser les lookafters sur les mots-clés
+		grep -Pim 1 "$regex" data/champ_lexi/ve.txt | tr '+-' ' ' | sed 's#^\(.*\):.*$#\1#' >tmp/vtheme.txt
+		if [ -z "$(cat tmp/vtheme.txt)" ]; then tail -1 tmp/vout_00.txt | awk '{print $2}'>tmp/vtheme.txt ;fi # le mot ayant la + haute fréquence fera office de thème car matcher les 3 mots les + hauts en fréquence n'a pas abouti
+	fi
+}
 
 
 
@@ -270,7 +274,7 @@ function hasLangStopwords {
 # récupère les stopwords d'une langue donnée dans $stop
 # précondition : c'est possible, @see hasLangStopwords
 function getStopwords {
-	stop="$(wget -qO- "http://members.unine.ch/jacques.savoy/clef/${lang}ST.txt" | uniq | awk '{if(length($1)>=w) print $0}')"
+	stop="$(wget -qO- "http://members.unine.ch/jacques.savoy/clef/${lang}ST.txt" | uniq | awk '{if(length($1)>=w) print $0}' | iconv -f 'WINDOWS-1252' -t 'UTF-8')"
 	st_arr=($stop)
 }
 
@@ -368,7 +372,7 @@ case "$#" in
 	lsargs=($args) # on split sur IFS
 
 	# on parse les arguments
-	while getopts ':c:L:lnpstw:' flag "${lsargs[@]}"; do
+	while getopts ':c:L:lnpstT:w:' flag "${lsargs[@]}"; do
 
 		case "$flag" in
 			c)
@@ -421,6 +425,14 @@ case "$#" in
 					dispParamGivenTwiceErr
 				fi
 				t_on=true # thème du texte ?
+				;;
+			T)
+				if "$T_on"; then
+					pgt='T'
+					dispParamGivenTwiceErr
+				fi
+				T="$OPTARG" # @override default value
+				T_on=true # souhaite préciser le nombre de mots à utiliser pour deviner le thème
 				;;
 			w)
 				if "$w_on"; then
