@@ -149,8 +149,10 @@ function performAnalysis {
 
 	# on recherche la nature du texte
 	getVerbs
+	guessNature
+	nature=$(cat tmp/vnature.txt)
 
-	#TODO rechercher le thème du texte (encyclopédie)
+	#on recherche le thème du texte
 	guessTheme
 	theme=$(cat tmp/vtheme.txt)
 
@@ -172,11 +174,44 @@ function show {
 
 
 
+# tente de deviner la nature d'un texte
+function guessNature {
+	if [ $n_on = true ]; then
+		if [ "$lang" = "french" ]; then
+			
+			# contiennent une liste de textes relatifs aux formes de verbes trouvées
+			narratif="conte, nouvelle, roman, reportage, fait divers, anecdote, fable"
+			injonctif="recette, notice, consigne, mode d'emploi, didacticiel, règlement, loi"
+			explicatif="encyclopédie, dictionnaire, documentaire, manuel, revue critique"
+
+			ls -1 "data/nature/" | while read fichier_de_terminaison; do
+				echo "$(grep -cf data/nature/$fichier_de_terminaison tmp/vverb.txt) $fichier_de_terminaison"
+			done | sort -g | head -1 | awk '{print $2}' >tmp/vnature.txt
+
+			# on donne la nature du texte et une liste des écrits possibles s'y rapportant
+			case "$(cat tmp/vnature.txt)" in
+				'narratif') echo "narratif : $narratif" >tmp/vnature.txt ;;
+				'injonctif') echo "injonctif : $injonctif" >tmp/vnature.txt ;;
+				'explicatif') echo "explicatif : $explicatif" >tmp/vnature.txt ;;
+			esac
+		else
+			dispHasNoVerbsErr # non disponible pour cette langue
+		fi
+	fi
+}
+
+
+
+
 # tente de deviner le thème d'un texte
 function guessTheme {
 	if [ $t_on = true ]; then
-		regex="$(tail -$T tmp/vout_00.txt | iconv -f utf8 -t ascii//TRANSLIT | awk '{print "(?=\\b"$2"\\b).*"}' ORS='' | sed 's#\.\*$##')" # il n'y a pas d'accents dans l'encyclopédie virtuelle   |   utilisation de PCRE (option -P) pour pouvoir utiliser les lookafters sur les mots-clés
-		grep -Pim 1 "$regex" data/champ_lexi/ve.txt | tr '+-' ' ' | sed 's#^\(.*\):.*$#\1#' >tmp/vtheme.txt
+		# filtrage des prénoms, qui viennent interférer avec la détection du thème
+		awk '{print $2}' tmp/vout_00.txt >tmp/vout_00a.txt
+		grep -xvFf data/prenoms/prenoms.txt tmp/vout_00a.txt >tmp/vout_00b.txt
+		# on tente de trouver un thème commun aux 3 mots (hors prénoms) les plus utilisés
+		regex="$(tail -$T tmp/vout_00b.txt | iconv -f utf8 -t ascii//TRANSLIT | awk '{print "(?=\\b"$2"\\b).*"}' ORS='' | sed 's#\.\*$##')" # il n'y a pas d'accents dans l'encyclopédie virtuelle   |   utilisation de PCRE (option -P) pour pouvoir utiliser les lookafters sur les mots-clés
+		grep -qPim 1 "$regex" data/champ_lexi/ve.txt | tr '+-' ' ' | sed 's#^\(.*\):.*$#\1#' >tmp/vtheme.txt
 		if [ -z "$(cat tmp/vtheme.txt)" ]; then tail -1 tmp/vout_00.txt | awk '{print $2}'>tmp/vtheme.txt ;fi # le mot ayant la + haute fréquence fera office de thème car matcher les 3 mots les + hauts en fréquence n'a pas abouti
 	fi
 }
@@ -479,3 +514,8 @@ esac
 # pour modifier le comportement par défaut du script, modifier les valeurs booléennes des flags. ATTENTION: le comportement peut être indéterminé et être source de crashs de la part du script
 # en bash, une fonction peu difficilement renvoyer une valeur à l'appelant. 2 solutions : le code de retour [0;255], ou l'écriture dans un fichier relu par le parent (c'est ce qui se passe ici avec la langue détectée)
 # l'intérêt de vider le dossier tmp au sein du script est restreint puisque les fichiers s'y trouvant se font override à chaque lancement de toute manière
+# liste de prénoms récupérée ici (licence GNU) : http://www.lexique.org/public/prenoms.php qui permet de ne pas cherche un thème contenant ces prénoms
+
+# perspectives d'amélioration :
+# * utilisation d'égrappoirs (cf http://members.unine.ch/jacques.savoy/clef/frenchStemmerPlus.txt pour du Français par exemple) lors de certains traitements
+# * "nettoyer" l'encyclopédie virtuelle (redondance, formatage, accentuation)
